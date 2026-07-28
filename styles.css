@@ -19,7 +19,7 @@ html[data-anti-ig="on"] body {
   height: auto !important;
 }
 
-html[data-anti-ig="on"] body > div {
+html[data-anti-ig="on"] body > div[id^="mount_"] {
   position: static !important;
   height: auto !important;
   overflow: visible !important;

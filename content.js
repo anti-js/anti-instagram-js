@@ -34,116 +34,77 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     chrome.storage.local.set({ blockedCount });
   }
 
-  let styleFixApplied = false;
+  const LOGIN_KEYWORDS = [
+    "Registrieren", "Sign up", "Anmelden", "Log in",
+    "Registriere dich", "Sieh dir", "Open Instagram",
+    "Instagram öffnen", "view this", "ansehen",
+    "full profile", "vollständige Profil", "Melde dich an"
+  ];
 
-  function removeLoginWall() {
-    if (!enabled) return;
-
-    let removed = false;
-
-    // Step 1: Find and remove login wall dialogs (role="dialog" with aria-modal="true")
-    const dialogs = document.querySelectorAll('div[role="dialog"][aria-modal="true"]');
-    if (dialogs.length > 0) {
-      dialogs.forEach(d => {
-        const text = d.textContent || "";
-        if (text.includes("Registrieren") || text.includes("Sign up") ||
-            text.includes("Anmelden") || text.includes("Log in") ||
-            text.includes("Registriere dich") || text.includes("Sieh dir") ||
-            text.includes("Open Instagram") || text.includes("Instagram öffnen") ||
-            text.includes("view this") || text.includes("ansehen") ||
-            text.includes("full profile") || text.includes("vollständige Profil")) {
-          const parent = d.parentElement;
-          if (parent && parent !== document.body) {
-            parent.remove();
-          } else {
-            d.remove();
-          }
-          removed = true;
-        }
-      });
-    }
-
-    // Step 2: Remove dark backdrop divs (rgba(12, 16, 20, 0.7) — Instagram's overlay scrim)
-    // Instagram sets styles via CSS classes, not inline styles, so we must check computed styles
-    // Scan top-level divs and their direct children only (not all divs) for performance
-    const backdropCandidates = document.querySelectorAll('body > div, body > div > div, main > div');
-    backdropCandidates.forEach(d => {
-      if (d.children.length !== 0) return;
-      const s = getComputedStyle(d);
-      if (s.position !== 'fixed' && s.position !== 'absolute') return;
-      if (s.pointerEvents === 'none' || s.display === 'none') return;
-      const bg = s.backgroundColor;
-      if (bg.includes('rgba(12, 16, 20') || bg.includes('rgba(0, 0, 0, 0.8') ||
-          bg.includes('rgba(0, 0, 0, 0.9') || bg.includes('rgba(38, 38, 38') ||
-          bg.includes('rgba(0,0,0,0.8') || bg.includes('rgba(0,0,0,0.9')) {
-        const rect = d.getBoundingClientRect();
-        if (rect.width >= window.innerWidth * 0.8 && rect.height >= window.innerHeight * 0.8) {
-          d.remove();
-          removed = true;
-        }
-      }
-    });
-
-    // Step 3: Remove empty full-screen overlays that intercept clicks
-    // Only scan direct children of body and main content containers — not all divs
-    const topLevelDivs = document.querySelectorAll('body > div, body > div > div');
-    topLevelDivs.forEach(d => {
-      const s = getComputedStyle(d);
-      if (s.pointerEvents === 'none' || s.display === 'none' || s.visibility === 'hidden') return;
-      if (s.position !== 'fixed' && s.position !== 'absolute') return;
-      const rect = d.getBoundingClientRect();
-      if (rect.width < window.innerWidth * 0.8 || rect.height < window.innerHeight * 0.8) return;
-      const hasContent = d.textContent.trim().length > 0 ||
-                         d.querySelector('img, video, input, button, a, canvas, svg');
-      if (!hasContent) {
-        d.remove();
-        removed = true;
-      }
-    });
-
-    // Step 4: Fix fixed-height content containers — only once, not every poll
-    if (!styleFixApplied || removed) {
-      const mainContainer = document.querySelector('main')?.closest('div');
-      if (mainContainer) {
-        const s = getComputedStyle(mainContainer);
-        if (s.position === 'fixed') {
-          mainContainer.style.position = 'static';
-          mainContainer.style.height = 'auto';
-          mainContainer.style.overflow = 'visible';
-          styleFixApplied = true;
-        }
-      }
-      // Also check parent of main
-      const mainParent = document.querySelector('main')?.parentElement;
-      if (mainParent) {
-        const s = getComputedStyle(mainParent);
-        if (s.position === 'fixed') {
-          mainParent.style.position = 'static';
-          mainParent.style.height = 'auto';
-          mainParent.style.overflow = 'visible';
-          styleFixApplied = true;
-        }
-      }
-    }
-
-    // Step 5: Unlock body scroll — only if needed
-    if (document.body.style.overflow !== '' || document.body.style.position !== '') {
-      document.body.style.overflow = '';
-      document.body.style.position = '';
-    }
-
-    if (removed) {
-      incrementCounter();
-    }
-
-    return removed;
+  function isLoginWall(el) {
+    const text = el.textContent || "";
+    return LOGIN_KEYWORDS.some(k => text.includes(k));
   }
 
-  // Intercept clicks on post links and story buttons to navigate directly, bypassing Instagram's login wall trigger
+  function hideElement(el) {
+    el.style.setProperty("display", "none", "important");
+    el.style.setProperty("pointer-events", "none", "important");
+  }
+
+  function removeLoginWall() {
+    if (!enabled || !document.body) return;
+
+    let blocked = false;
+
+    // 1) Hide login wall dialogs and their wrapper containers
+    document.querySelectorAll('div[role="dialog"][aria-modal="true"]').forEach(d => {
+      if (isLoginWall(d)) {
+        const wrapper = d.parentElement && d.parentElement !== document.body
+          ? d.parentElement
+          : d;
+        hideElement(wrapper);
+        blocked = true;
+      }
+    });
+
+    // 2) Hide dark scrims (Instagram's class for the modal backdrop)
+    document.querySelectorAll('.x1h0vfkc').forEach(d => {
+      hideElement(d);
+      blocked = true;
+    });
+
+    // 3) Neutralize empty full-screen click interceptors — disable pointer
+    //    events instead of removing, so React never notices missing nodes
+    document.querySelectorAll('.x1qjc9v5, .x1ey2m1c').forEach(d => {
+      if (d.textContent.trim() === "" &&
+          !d.querySelector('img, video, input, button, a, canvas, svg')) {
+        d.style.setProperty("pointer-events", "none", "important");
+      }
+    });
+
+    // 4) Unlock scrolling — guarded, cheap, idempotent
+    const body = document.body;
+    const html = document.documentElement;
+    if (body.style.overflow || body.style.position || body.style.height === "100%") {
+      body.style.overflow = "";
+      body.style.position = "";
+      body.style.height = "";
+    }
+    if (html.style.overflow || html.style.height === "100%") {
+      html.style.overflow = "";
+      html.style.height = "";
+    }
+
+    if (blocked) {
+      incrementCounter();
+    }
+  }
+
+  // Intercept clicks on post links and story buttons to navigate directly,
+  // bypassing Instagram's login wall trigger
   document.addEventListener('click', (e) => {
     if (!enabled) return;
 
-    // Check for post links: /username/p/POSTID/ or /p/POSTID/
     const link = e.target.closest('a[href]');
     if (link) {
       const href = link.getAttribute('href') || '';
@@ -155,41 +116,33 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
       }
     }
 
-    // Check for story button clicks (div[role="button"] with aria-label containing "Story")
     const storyBtn = e.target.closest('[role="button"][aria-label*="Story"], [role="button"][aria-label*="story"]');
     if (storyBtn) {
       e.preventDefault();
       e.stopPropagation();
-      // Extract username from the page URL
       const match = window.location.pathname.match(/^\/([^/]+)\/?$/);
       if (match) {
-        const username = match[1];
-        window.location.href = `/stories/${username}/`;
+        window.location.href = `/stories/${match[1]}/`;
       }
-      return;
     }
   }, true);
 
-  // MutationObserver — only trigger on new dialog elements being added
+  // MutationObserver — react only when dialog/scrim nodes appear
   let debounceTimer = null;
   const observer = new MutationObserver((mutations) => {
     if (!enabled) return;
-    // Only react if a dialog was added or role attribute changed
     let shouldCheck = false;
     for (const m of mutations) {
-      if (m.addedNodes.length > 0) {
-        for (const node of m.addedNodes) {
-          if (node.nodeType === 1 && (node.getAttribute?.('role') === 'dialog' ||
-              node.querySelector?.('[role="dialog"]'))) {
-            shouldCheck = true;
-            break;
-          }
+      for (const node of m.addedNodes) {
+        if (node.nodeType !== 1) continue;
+        if (node.getAttribute?.('role') === 'dialog' ||
+            node.classList?.contains('x1h0vfkc') ||
+            node.querySelector?.('[role="dialog"], .x1h0vfkc')) {
+          shouldCheck = true;
+          break;
         }
       }
-      if (m.type === 'attributes' && m.attributeName === 'role' &&
-          m.target.getAttribute('role') === 'dialog') {
-        shouldCheck = true;
-      }
+      if (shouldCheck) break;
     }
     if (shouldCheck) {
       clearTimeout(debounceTimer);
@@ -197,25 +150,33 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     }
   });
 
-  observer.observe(document.documentElement, {
-    childList: true,
-    subtree: true,
-    attributes: true,
-    attributeFilter: ["role"],
-  });
+  function startObserver() {
+    if (!document.body) {
+      setTimeout(startObserver, 50);
+      return;
+    }
+    observer.observe(document.body, { childList: true, subtree: true });
+  }
 
-  // Lighter polling — only check for dialogs, don't re-apply style fixes
+  // Light polling as a safety net for SPA navigations
   setInterval(() => {
     if (!enabled) return;
     if (!document.documentElement.hasAttribute("data-anti-ig")) {
       document.documentElement.setAttribute("data-anti-ig", "on");
     }
-    // Only run full removal if a dialog exists
-    if (document.querySelector('div[role="dialog"][aria-modal="true"]')) {
+    if (document.querySelector('div[role="dialog"][aria-modal="true"], .x1h0vfkc')) {
       removeLoginWall();
     }
-  }, 500);
+  }, 1000);
 
-  // Initial run
-  removeLoginWall();
+  // Initial run — wait until body exists (script runs at document_start)
+  function init() {
+    if (document.body) {
+      removeLoginWall();
+      startObserver();
+    } else {
+      setTimeout(init, 50);
+    }
+  }
+  init();
 })();
