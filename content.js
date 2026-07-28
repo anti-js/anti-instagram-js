@@ -83,6 +83,9 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
       html[data-anti-ig="on"] .x1uvtmcs {
         pointer-events: none !important;
       }
+      html[data-anti-ig="on"] .xg6iff7.xippug5 {
+        pointer-events: none !important;
+      }
     `;
     (document.head || document.documentElement).appendChild(s);
   }
@@ -128,23 +131,21 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
       blocked = true;
     });
 
-    // 3) Neutralize click interceptors — Instagram uses multiple overlay
-    //    classes to intercept clicks. Disable pointer-events on known
-    //    overlay classes and any full-viewport div without interactive content.
-    document.querySelectorAll('.x1qjc9v5.x9f619.x78zum5.xdt5ytf.x1iyjqo2.xl56j7k, .x1uvtmcs').forEach(d => {
+    // 3) Neutralize specific click interceptors by class name only.
+    //    Do NOT broadly scan all divs — that blocks the main content container.
+    document.querySelectorAll('.x1qjc9v5.x9f619.x78zum5.xdt5ytf.x1iyjqo2.xl56j7k, .x1uvtmcs, .xg6iff7.xippug5').forEach(d => {
       if (d && d.style) d.style.setProperty("pointer-events", "none", "important");
     });
-    // Also scan for any div covering most of the viewport with no
-    // interactive content — these are click interceptors
-    if (document.body) {
-      document.querySelectorAll('div').forEach(d => {
-        if (d === document.body || d.parentElement !== document.body) return;
-        const rect = d.getBoundingClientRect();
-        if (rect.width < window.innerWidth * 0.5 || rect.height < window.innerHeight * 0.5) return;
-        if (d.querySelector('img, video, input, button, a, canvas, svg, [role="dialog"], [role="button"]')) return;
-        d.style.setProperty("pointer-events", "none", "important");
-      });
-    }
+    // Re-enable pointer-events on #scrollview content container
+    // There are TWO #scrollview divs — one contains the page content,
+    // the other is an overlay. Disable the overlay, enable the content one.
+    document.querySelectorAll('#scrollview').forEach(sv => {
+      if (sv.querySelector('a[href*="/p/"], main, article')) {
+        sv.style.setProperty("pointer-events", "auto", "important");
+      } else {
+        sv.style.setProperty("pointer-events", "none", "important");
+      }
+    });
 
     unlockScroll();
 
@@ -219,32 +220,12 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
   }
   requestAnimationFrame(rafFallback);
 
-  // ─── Click interception for posts, stories, and "load more" ────────────
-  // Use capture phase to intercept clicks before Instagram's handlers.
-  // If the click hits an overlay div, find the real button underneath.
+  // ─── Click interception for posts and stories ───────────────────────
+  // Only intercept clicks on post links and story buttons to navigate
+  // directly, bypassing Instagram's login-wall interceptors.
+  // Do NOT intercept all div clicks — that breaks normal page interaction.
   document.addEventListener('click', (e) => {
     if (!enabled) return;
-
-    // If click landed on an overlay (not a button/link), try to find
-    // the real interactive element underneath
-    if (e.target.tagName === 'DIV' && !e.target.matches('button, a, [role="button"], input')) {
-      // Temporarily hide the overlay to find what's underneath
-      const target = e.target;
-      const origPE = target.style.pointerEvents;
-      target.style.pointerEvents = 'none';
-      const rect = target.getBoundingClientRect();
-      const realTarget = document.elementFromPoint(rect.left + rect.width/2, rect.top + rect.height/2);
-      target.style.pointerEvents = origPE;
-      
-      if (realTarget && realTarget !== target && 
-          (realTarget.matches('button, [role="button"]') || realTarget.closest('button, [role="button"]'))) {
-        const btn = realTarget.closest('button, [role="button"]') || realTarget;
-        btn.click();
-        e.preventDefault();
-        e.stopPropagation();
-        return;
-      }
-    }
 
     const link = e.target.closest('a[href]');
     if (link) {
