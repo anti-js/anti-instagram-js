@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="popup.css">
+  <title>Anti Instagram Login</title>
+</head>
+<body>
+  <div class="header">
+    <h1>Anti Instagram Login</h1>
+  </div>
+
+  <div class="toggle-row">
+    <label class="switch">
+      <input type="checkbox" id="enabledToggle">
+      <span class="slider"></span>
+    </label>
+    <span class="toggle-label">Extension Enabled</span>
+  </div>
+
+  <div class="counter-row">
+    <div class="counter">
+      <span class="counter-label">Login walls removed</span>
+      <span class="counter-value" id="blockedCount">0</span>
+    </div>
+    <button id="resetBtn" class="reset-btn">Reset</button>
+  </div>
+
+  <div class="footer">
+    <a href="https://github.com/anti-js/anti-instagram-login" target="_blank">GitHub</a>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

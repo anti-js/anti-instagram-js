@@ -1,0 +1,19 @@
+/* Anti Instagram Login — hide login walls before they render */
+
+html[data-anti-ig="on"] div[role="dialog"][aria-modal="true"] {
+  display: none !important;
+}
+
+/* Hide dark backdrop overlays (Instagram's scrim) */
+html[data-anti-ig="on"] div[style*="rgba(12, 16, 20"],
+html[data-anti-ig="on"] div[style*="rgba(0, 0, 0, 0.8"],
+html[data-anti-ig="on"] div[style*="rgba(0, 0, 0, 0.9"] {
+  display: none !important;
+}
+
+/* Unlock scroll when login wall is removed */
+html[data-anti-ig="on"] body {
+  overflow: auto !important;
+  position: static !important;
+  height: auto !important;
+}
