@@ -138,14 +138,34 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     });
     // Re-enable pointer-events on #scrollview content container
     // There are TWO #scrollview divs — one contains the page content,
-    // the other is an overlay. Disable the overlay, enable the content one.
+    // the other is an overlay. Disable the overlay and its children,
+    // enable the content one.
     document.querySelectorAll('#scrollview').forEach(sv => {
       if (sv.querySelector('a[href*="/p/"], main, article')) {
         sv.style.setProperty("pointer-events", "auto", "important");
       } else {
         sv.style.setProperty("pointer-events", "none", "important");
+        sv.querySelectorAll('*').forEach(child => {
+          child.style.setProperty("pointer-events", "none", "important");
+        });
       }
     });
+    // Also disable overlay divs that are OUTSIDE #scrollview —
+    // Instagram adds separate overlay layers (x1n2onr6.xzkaem6 chain)
+    // that cover the viewport and intercept clicks on lower posts.
+    if (document.body) {
+      document.body.querySelectorAll(':scope > div, :scope > div > div').forEach(d => {
+        if (d.closest('#scrollview')) return;
+        if (d.id && d.id.startsWith('mount_')) return;
+        const rect = d.getBoundingClientRect();
+        if (rect.width < window.innerWidth * 0.5 || rect.height < 200) return;
+        if (d.querySelector('a[href*="/p/"], a[href*="/accounts/"], button, main, nav, [role="navigation"], [role="main"]')) return;
+        d.style.setProperty("pointer-events", "none", "important");
+        d.querySelectorAll('*').forEach(child => {
+          child.style.setProperty("pointer-events", "none", "important");
+        });
+      });
+    }
 
     unlockScroll();
 
