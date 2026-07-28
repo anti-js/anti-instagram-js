@@ -63,16 +63,19 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
       });
     }
 
-    // Step 2: Remove dark backdrop divs — only check fixed/absolute divs with 0 children
-    // Use a targeted selector instead of scanning all divs
-    const fixedDivs = document.querySelectorAll('div[style*="position: fixed"], div[style*="position:fixed"]');
-    fixedDivs.forEach(d => {
+    // Step 2: Remove dark backdrop divs (rgba(12, 16, 20, 0.7) — Instagram's overlay scrim)
+    // Instagram sets styles via CSS classes, not inline styles, so we must check computed styles
+    // Scan top-level divs and their direct children only (not all divs) for performance
+    const backdropCandidates = document.querySelectorAll('body > div, body > div > div, main > div');
+    backdropCandidates.forEach(d => {
       if (d.children.length !== 0) return;
       const s = getComputedStyle(d);
+      if (s.position !== 'fixed' && s.position !== 'absolute') return;
+      if (s.pointerEvents === 'none' || s.display === 'none') return;
       const bg = s.backgroundColor;
-      if (s.pointerEvents !== 'none' &&
-          (bg.includes('rgba(12, 16, 20') || bg.includes('rgba(0, 0, 0, 0.8') ||
-           bg.includes('rgba(0, 0, 0, 0.9') || bg.includes('rgba(38, 38, 38'))) {
+      if (bg.includes('rgba(12, 16, 20') || bg.includes('rgba(0, 0, 0, 0.8') ||
+          bg.includes('rgba(0, 0, 0, 0.9') || bg.includes('rgba(38, 38, 38') ||
+          bg.includes('rgba(0,0,0,0.8') || bg.includes('rgba(0,0,0,0.9')) {
         const rect = d.getBoundingClientRect();
         if (rect.width >= window.innerWidth * 0.8 && rect.height >= window.innerHeight * 0.8) {
           d.remove();

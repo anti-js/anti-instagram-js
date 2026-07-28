@@ -5,6 +5,7 @@ html[data-anti-ig="on"] div[role="dialog"][aria-modal="true"] {
 }
 
 /* Hide dark backdrop overlays (Instagram's scrim) */
+html[data-anti-ig="on"] .x1h0vfkc,
 html[data-anti-ig="on"] div[style*="rgba(12, 16, 20"],
 html[data-anti-ig="on"] div[style*="rgba(0, 0, 0, 0.8"],
 html[data-anti-ig="on"] div[style*="rgba(0, 0, 0, 0.9"] {
