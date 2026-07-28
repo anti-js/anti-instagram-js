@@ -82,19 +82,34 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
 
     // Remove empty full-screen divs that intercept clicks (Instagram's invisible overlay)
     // These are empty divs with pointer-events:auto that cover the whole viewport
+    // Also check recursively — some have a single empty child div
     allDivs.forEach(d => {
-      if (d.children.length !== 0) return;
       const s = getComputedStyle(d);
       if (s.pointerEvents === 'none' || s.display === 'none' || s.visibility === 'hidden') return;
+      if (s.position !== 'fixed' && s.position !== 'absolute') return;
       const rect = d.getBoundingClientRect();
-      if (rect.width >= window.innerWidth * 0.8 && rect.height >= window.innerHeight * 0.8) {
-        // Only remove if it has no visible content (no text, no images, no inputs)
-        const hasContent = d.textContent.trim().length > 0 ||
-                           d.querySelector('img, video, input, button, a, canvas, svg');
-        if (!hasContent) {
-          d.remove();
-          removed = true;
-        }
+      if (rect.width < window.innerWidth * 0.8 || rect.height < window.innerHeight * 0.8) return;
+      // Check if this div or its subtree has any real content
+      const hasContent = d.textContent.trim().length > 0 ||
+                         d.querySelector('img, video, input, button, a, canvas, svg');
+      if (!hasContent) {
+        d.remove();
+        removed = true;
+      }
+    });
+
+    // Fix fixed-height containers that prevent scrolling
+    // Instagram wraps content in position:fixed divs with height locked to viewport
+    allDivs.forEach(d => {
+      const s = getComputedStyle(d);
+      if (s.position !== 'fixed') return;
+      const rect = d.getBoundingClientRect();
+      if (rect.width < window.innerWidth * 0.8 || rect.height < window.innerHeight * 0.8) return;
+      // Only fix containers that have actual content (the main content wrapper)
+      if (d.querySelector('main, article, section, [role="main"]')) {
+        d.style.position = 'static';
+        d.style.height = 'auto';
+        d.style.overflow = 'visible';
       }
     });
 
@@ -102,7 +117,8 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     document.body.style.overflow = "";
     document.documentElement.style.overflow = "";
     document.body.style.position = "";
-    document.body.style.height = "";
+    document.body.style.height = "auto";
+    document.documentElement.style.height = "auto";
 
     if (removed) {
       incrementCounter();
