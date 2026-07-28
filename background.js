@@ -29,76 +29,96 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 // This is the only reliable way to override window.scrollTo in the
 // same JS context where Instagram's code runs.
 function injectScrollGuardInMainWorld(tabId) {
-  if (!chrome.scripting || !chrome.scripting.executeScript) return;
+  const api = (typeof browser !== "undefined" ? browser.scripting : null) ||
+              (typeof chrome !== "undefined" ? chrome.scripting : null);
+  if (!api || !api.executeScript) return;
 
-  chrome.scripting.executeScript({
-    target: { tabId: tabId },
-    world: "MAIN",
-    func: function () {
-      if (window.__antiIgScrollGuard) return;
-      window.__antiIgScrollGuard = true;
+  const scrollGuardFunc = function () {
+    if (window.__antiIgScrollGuard) return;
+    window.__antiIgScrollGuard = true;
 
-      var lockedY = -1, userY = 0, restoring = false;
-      window.addEventListener('scroll', function () {
-        if (restoring) return;
-        userY = window.scrollY;
-        if (userY > 50) lockedY = userY;
-      }, { passive: true });
+    var lockedY = -1, userY = 0, restoring = false;
+    window.addEventListener('scroll', function () {
+      if (restoring) return;
+      userY = window.scrollY;
+      if (userY > 50) lockedY = userY;
+    }, { passive: true });
 
-      var o1 = window.scrollTo.bind(window);
-      window.scrollTo = function () {
-        if (arguments.length >= 2 && arguments[1] === 0 && userY > 50) return;
-        return o1.apply(window, arguments);
-      };
-      var o2 = window.scroll.bind(window);
-      window.scroll = function () {
-        if (arguments.length >= 2 && arguments[1] === 0 && userY > 50) return;
-        return o2.apply(window, arguments);
-      };
+    var o1 = window.scrollTo.bind(window);
+    window.scrollTo = function () {
+      if (arguments.length >= 2 && arguments[1] === 0 && userY > 50) return;
+      return o1.apply(window, arguments);
+    };
+    var o2 = window.scroll.bind(window);
+    window.scroll = function () {
+      if (arguments.length >= 2 && arguments[1] === 0 && userY > 50) return;
+      return o2.apply(window, arguments);
+    };
 
-      // Override scrollTop setter on html element
-      var html = document.documentElement;
-      var desc = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
-      if (desc && desc.set) {
+    var html = document.documentElement;
+    var desc = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop');
+    if (desc && desc.set) {
+      try {
         Object.defineProperty(html, 'scrollTop', {
           get: function () { return desc.get.call(this); },
           set: function (v) { if (v === 0 && userY > 50) return; desc.set.call(this, v); },
           configurable: true
         });
-      }
+      } catch (e) {}
+    }
 
-      // Override scrollIntoView to block scrolling to top elements
-      var osi = Element.prototype.scrollIntoView;
-      Element.prototype.scrollIntoView = function () {
-        var r = this.getBoundingClientRect();
-        if (r.top > -10 && r.top < 10 && userY > 50) return;
-        return osi.apply(this, arguments);
-      };
+    var osi = Element.prototype.scrollIntoView;
+    Element.prototype.scrollIntoView = function () {
+      var r = this.getBoundingClientRect();
+      if (r.top > -10 && r.top < 10 && userY > 50) return;
+      return osi.apply(this, arguments);
+    };
 
-      // Override focus to prevent scroll-into-view on focus
-      var ofn = HTMLElement.prototype.focus;
-      HTMLElement.prototype.focus = function () {
-        var r = this.getBoundingClientRect();
-        if (r.top > -10 && r.top < 10 && userY > 50) return;
-        return ofn.apply(this, arguments);
-      };
+    var ofn = HTMLElement.prototype.focus;
+    HTMLElement.prototype.focus = function () {
+      var r = this.getBoundingClientRect();
+      if (r.top > -10 && r.top < 10 && userY > 50) return;
+      return ofn.apply(this, arguments);
+    };
 
-      if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
+    if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
-      // rAF loop: continuously restore scroll if yanked to top
-      function rafLock() {
-        if (userY > 50 && window.scrollY < 10) {
-          restoring = true;
-          o1(0, lockedY > 0 ? lockedY : userY);
-          setTimeout(function () { restoring = false; }, 50);
-        }
-        requestAnimationFrame(rafLock);
+    function rafLock() {
+      if (userY > 50 && window.scrollY < 10) {
+        restoring = true;
+        o1(0, lockedY > 0 ? lockedY : userY);
+        setTimeout(function () { restoring = false; }, 50);
       }
       requestAnimationFrame(rafLock);
     }
-  }).catch(function (e) {
-    // Silently fail — content script rAF fallback will handle it
-  });
+    requestAnimationFrame(rafLock);
+  };
+
+  // Try with world: "MAIN" first (Chrome 111+, Firefox 128+)
+  try {
+    api.executeScript({
+      target: { tabId: tabId },
+      world: "MAIN",
+      func: scrollGuardFunc
+    }).catch(function () {
+      // Fallback: try without world (runs in isolated world, less effective
+      // but still provides rAF scroll restoration)
+      try {
+        api.executeScript({
+          target: { tabId: tabId },
+          func: scrollGuardFunc
+        }).catch(function () {});
+      } catch (e) {}
+    });
+  } catch (e) {
+    // Synchronous fallback for older browsers
+    try {
+      api.executeScript({
+        target: { tabId: tabId },
+        func: scrollGuardFunc
+      }, function () {});
+    } catch (e2) {}
+  }
 }
 
 // Also inject on tab update (SPA navigation within Instagram)

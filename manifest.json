@@ -8,6 +8,7 @@
     "128": "icons/icon128.png"
   },
   "permissions": ["storage", "scripting"],
+  "host_permissions": ["*://*.instagram.com/*"],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
@@ -16,8 +17,7 @@
     }
   },
   "background": {
-    "service_worker": "background.js",
-    "scripts": ["background.js"]
+    "service_worker": "background.js"
   },
   "browser_specific_settings": {
     "gecko": {

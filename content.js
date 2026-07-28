@@ -101,6 +101,7 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
   }
 
   function hideElement(el) {
+    if (!el || !el.style) return;
     el.style.setProperty("display", "none", "important");
     el.style.setProperty("pointer-events", "none", "important");
   }
@@ -131,17 +132,19 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     //    classes to intercept clicks. Disable pointer-events on known
     //    overlay classes and any full-viewport div without interactive content.
     document.querySelectorAll('.x1qjc9v5.x9f619.x78zum5.xdt5ytf.x1iyjqo2.xl56j7k, .x1uvtmcs').forEach(d => {
-      d.style.setProperty("pointer-events", "none", "important");
+      if (d && d.style) d.style.setProperty("pointer-events", "none", "important");
     });
     // Also scan for any div covering most of the viewport with no
     // interactive content — these are click interceptors
-    document.querySelectorAll('div').forEach(d => {
-      if (d === document.body || d.parentElement !== document.body) return;
-      const rect = d.getBoundingClientRect();
-      if (rect.width < window.innerWidth * 0.5 || rect.height < window.innerHeight * 0.5) return;
-      if (d.querySelector('img, video, input, button, a, canvas, svg, [role="dialog"], [role="button"]')) return;
-      d.style.setProperty("pointer-events", "none", "important");
-    });
+    if (document.body) {
+      document.querySelectorAll('div').forEach(d => {
+        if (d === document.body || d.parentElement !== document.body) return;
+        const rect = d.getBoundingClientRect();
+        if (rect.width < window.innerWidth * 0.5 || rect.height < window.innerHeight * 0.5) return;
+        if (d.querySelector('img, video, input, button, a, canvas, svg, [role="dialog"], [role="button"]')) return;
+        d.style.setProperty("pointer-events", "none", "important");
+      });
+    }
 
     unlockScroll();
 
@@ -180,7 +183,10 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     // Send message to background script to inject in MAIN world
     try {
       chrome.runtime.sendMessage({ action: "injectScrollGuard" });
-    } catch (e) {}
+    } catch (e) {
+      // Extension context invalidated (extension was reloaded)
+      // Content-script rAF fallback will handle scroll restoration
+    }
   }
 
   // ─── Content-script fallback: rAF scroll lock + event-based restore ────
@@ -271,7 +277,7 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
       // Strip style attribute changes on body/html (Instagram re-applies
       // height:100% and overflow:hidden via inline styles)
       if (m.type === 'attributes' && m.attributeName === 'style') {
-        if (m.target === document.body || m.target === document.documentElement) {
+        if ((m.target === document.body && document.body) || m.target === document.documentElement) {
           unlockScroll();
         }
       }
