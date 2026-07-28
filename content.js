@@ -172,76 +172,46 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
   }
 
   // ─── Inject scroll guard into PAGE'S MAIN WORLD ────────────────────────
-  // Content scripts run in an isolated world — overriding window.scrollTo
-  // here does NOT affect Instagram's page-world JS. We must inject a
-  // <script> element into the page DOM so the override runs in the same
-  // JS context as Instagram's code.
+  // Content scripts run in an isolated world — we can't override
+  // window.scrollTo here. Instagram's CSP blocks inline <script> and
+  // blob: scripts. The only way is chrome.scripting.executeScript with
+  // world:"MAIN" from the background script, which bypasses CSP.
   function injectScrollGuard() {
-    if (document.getElementById("anti-ig-scroll-guard")) return;
-
-    const code = [
-      "(function(){",
-      "  var uy=0;",
-      "  window.addEventListener('scroll',function(){uy=window.scrollY},{passive:true});",
-      "  var o=window.scrollTo.bind(window);",
-      "  window.scrollTo=function(){",
-      "    if(arguments.length>=2&&arguments[1]===0&&uy>100)return;",
-      "    return o.apply(window,arguments);",
-      "  };",
-      "  var o2=window.scroll.bind(window);",
-      "  window.scroll=function(){",
-      "    if(arguments.length>=2&&arguments[1]===0&&uy>100)return;",
-      "    return o2.apply(window,arguments);",
-      "  };",
-      "  var osi=Element.prototype.scrollIntoView;",
-      "  Element.prototype.scrollIntoView=function(){",
-      "    var r=this.getBoundingClientRect();",
-      "    if(r.top>-10&&r.top<10&&uy>100)return;",
-      "    return osi.apply(this,arguments);",
-      "  };",
-      "  if('scrollRestoration'in history)history.scrollRestoration='manual';",
-      "  window.__antiIgScrollGuard=true;",
-      "})();"
-    ].join("\n");
-
-    // Try inline script first
-    const s = document.createElement("script");
-    s.id = "anti-ig-scroll-guard";
-    s.textContent = code;
-    (document.head || document.documentElement).appendChild(s);
-
-    // Fallback: if CSP blocked inline script, try blob URL
-    setTimeout(() => {
-      s.remove();
-      try {
-        const blob = new Blob([code], { type: "text/javascript" });
-        const url = URL.createObjectURL(blob);
-        const s2 = document.createElement("script");
-        s2.id = "anti-ig-scroll-guard";
-        s2.src = url;
-        s2.onload = () => URL.revokeObjectURL(url);
-        (document.head || document.documentElement).appendChild(s2);
-      } catch (e) {}
-    }, 200);
+    // Send message to background script to inject in MAIN world
+    try {
+      chrome.runtime.sendMessage({ action: "injectScrollGuard" });
+    } catch (e) {}
   }
 
-  // ─── Content-script fallback: restore scroll if yanked to top ──────────
-  // If the page-world guard fails (CSP), this detects unexpected scroll-to-0
-  // and restores the user's position. Uses a flag to avoid infinite loops.
+  // ─── Content-script fallback: rAF scroll lock + event-based restore ────
+  // Runs in the content script's isolated world as a fallback in case
+  // the page-world <script> injection is blocked by CSP.
   let lastGoodScrollY = 0;
   let restoringScroll = false;
   window.addEventListener('scroll', () => {
     if (restoringScroll) return;
-    if (window.scrollY > 100) {
+    if (window.scrollY > 50) {
       lastGoodScrollY = window.scrollY;
-    } else if (window.scrollY <= 10 && lastGoodScrollY > 100 && enabled) {
+    } else if (window.scrollY <= 10 && lastGoodScrollY > 50 && enabled) {
       restoringScroll = true;
       const target = lastGoodScrollY;
       lastGoodScrollY = 0;
       window.scrollTo(0, target);
-      setTimeout(() => { restoringScroll = false; }, 200);
+      setTimeout(() => { restoringScroll = false; }, 100);
     }
   }, { passive: true });
+
+  // rAF-based fallback: check every frame if scroll was yanked to top
+  function rafFallback() {
+    if (enabled && lastGoodScrollY > 50 && window.scrollY <= 10 && !restoringScroll) {
+      restoringScroll = true;
+      const target = lastGoodScrollY;
+      window.scrollTo(0, target);
+      setTimeout(() => { restoringScroll = false; }, 100);
+    }
+    requestAnimationFrame(rafFallback);
+  }
+  requestAnimationFrame(rafFallback);
 
   // ─── Click interception for posts, stories, and "load more" ────────────
   // Use capture phase to intercept clicks before Instagram's handlers.
