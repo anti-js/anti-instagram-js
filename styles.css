@@ -12,15 +12,36 @@ html[data-anti-ig="on"] div[style*="rgba(0, 0, 0, 0.9"] {
   display: none !important;
 }
 
-/* Unlock scroll when login wall is removed */
-html[data-anti-ig="on"] body {
-  overflow: auto !important;
-  position: static !important;
+/* Unlock scroll when login wall is removed — also overrides Instagram's
+   inline pixel-height caps that cut off content below the fold */
+html[data-anti-ig="on"] {
   height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+  overflow: auto !important;
 }
 
-html[data-anti-ig="on"] body > div[id^="mount_"] {
+html[data-anti-ig="on"] body {
+  overflow: visible !important;
   position: static !important;
   height: auto !important;
+  min-height: 0 !important;
+  max-height: none !important;
+}
+
+/* Break Instagram's height:100% container chain that creates a two-stage
+   scroll (window scrolls 925px, then body internally scrolls more).
+   Force the whole structural chain to content height so there is a single
+   window scroll. Must be CSS — React wipes inline styles on re-render. */
+html[data-anti-ig="on"] body > div[id^="mount_"],
+html[data-anti-ig="on"] body > div[id^="mount_"] > div,
+html[data-anti-ig="on"] body > div[id^="mount_"] > div > div,
+html[data-anti-ig="on"] body > div[id^="mount_"] > div > div > div,
+html[data-anti-ig="on"] body > div[id^="mount_"] > div > div > div > div,
+html[data-anti-ig="on"] body > div[id^="mount_"] > div > div > div > div > div,
+html[data-anti-ig="on"] body > div[id^="mount_"] > div > div > div > div > div > div {
+  position: static !important;
+  height: auto !important;
+  max-height: none !important;
   overflow: visible !important;
 }

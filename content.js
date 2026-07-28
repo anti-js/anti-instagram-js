@@ -82,22 +82,28 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
       }
     });
 
-    // 4) Unlock scrolling — guarded, cheap, idempotent
-    const body = document.body;
-    const html = document.documentElement;
-    if (body.style.overflow || body.style.position || body.style.height === "100%") {
-      body.style.overflow = "";
-      body.style.position = "";
-      body.style.height = "";
-    }
-    if (html.style.overflow || html.style.height === "100%") {
-      html.style.overflow = "";
-      html.style.height = "";
-    }
+    unlockScroll();
 
     if (blocked) {
       incrementCounter();
     }
+  }
+
+  // Clear any inline height cap (Instagram sets fixed pixel heights on
+  // html/body which cut off content below the fold and lock scrolling)
+  function unlockScroll() {
+    if (!document.body) return;
+    const body = document.body;
+    const html = document.documentElement;
+    if (body.style.overflow) body.style.overflow = "";
+    if (body.style.position) body.style.position = "";
+    if (body.style.height) body.style.height = "";
+    if (body.style.minHeight) body.style.minHeight = "";
+    if (body.style.maxHeight) body.style.maxHeight = "";
+    if (html.style.overflow) html.style.overflow = "";
+    if (html.style.height) html.style.height = "";
+    if (html.style.minHeight) html.style.minHeight = "";
+    if (html.style.maxHeight) html.style.maxHeight = "";
   }
 
   // Intercept clicks on post links and story buttons to navigate directly,
@@ -158,12 +164,14 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     observer.observe(document.body, { childList: true, subtree: true });
   }
 
-  // Light polling as a safety net for SPA navigations
+  // Light polling as a safety net — always clear height caps, run full
+  // removal only when a dialog or scrim is present
   setInterval(() => {
     if (!enabled) return;
     if (!document.documentElement.hasAttribute("data-anti-ig")) {
       document.documentElement.setAttribute("data-anti-ig", "on");
     }
+    unlockScroll();
     if (document.querySelector('div[role="dialog"][aria-modal="true"], .x1h0vfkc')) {
       removeLoginWall();
     }
