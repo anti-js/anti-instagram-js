@@ -77,6 +77,12 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
       html[data-anti-ig="on"] .x1h0vfkc {
         display: none !important;
       }
+      html[data-anti-ig="on"] .x1qjc9v5.x9f619.x78zum5.xdt5ytf.x1iyjqo2.xl56j7k {
+        pointer-events: none !important;
+      }
+      html[data-anti-ig="on"] .x1uvtmcs {
+        pointer-events: none !important;
+      }
     `;
     (document.head || document.documentElement).appendChild(s);
   }
@@ -121,12 +127,20 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
       blocked = true;
     });
 
-    // 3) Neutralize empty full-screen click interceptors
-    document.querySelectorAll('.x1qjc9v5, .x1ey2m1c').forEach(d => {
-      if (d.textContent.trim() === "" &&
-          !d.querySelector('img, video, input, button, a, canvas, svg')) {
-        d.style.setProperty("pointer-events", "none", "important");
-      }
+    // 3) Neutralize click interceptors — Instagram uses multiple overlay
+    //    classes to intercept clicks. Disable pointer-events on known
+    //    overlay classes and any full-viewport div without interactive content.
+    document.querySelectorAll('.x1qjc9v5.x9f619.x78zum5.xdt5ytf.x1iyjqo2.xl56j7k, .x1uvtmcs').forEach(d => {
+      d.style.setProperty("pointer-events", "none", "important");
+    });
+    // Also scan for any div covering most of the viewport with no
+    // interactive content — these are click interceptors
+    document.querySelectorAll('div').forEach(d => {
+      if (d === document.body || d.parentElement !== document.body) return;
+      const rect = d.getBoundingClientRect();
+      if (rect.width < window.innerWidth * 0.5 || rect.height < window.innerHeight * 0.5) return;
+      if (d.querySelector('img, video, input, button, a, canvas, svg, [role="dialog"], [role="button"]')) return;
+      d.style.setProperty("pointer-events", "none", "important");
     });
 
     unlockScroll();
@@ -157,27 +171,104 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     }
   }
 
-  // ─── Guard window.scrollTo to prevent Instagram from pulling user back ─
-  // Instagram's React components sometimes call scrollTo(0, 0) on re-render,
-  // which yanks the user back to the top. We allow user-initiated scrolls
-  // but block programmatic ones that target y=0 when the user has scrolled.
-  let userScrollY = 0;
+  // ─── Inject scroll guard into PAGE'S MAIN WORLD ────────────────────────
+  // Content scripts run in an isolated world — overriding window.scrollTo
+  // here does NOT affect Instagram's page-world JS. We must inject a
+  // <script> element into the page DOM so the override runs in the same
+  // JS context as Instagram's code.
+  function injectScrollGuard() {
+    if (document.getElementById("anti-ig-scroll-guard")) return;
+
+    const code = [
+      "(function(){",
+      "  var uy=0;",
+      "  window.addEventListener('scroll',function(){uy=window.scrollY},{passive:true});",
+      "  var o=window.scrollTo.bind(window);",
+      "  window.scrollTo=function(){",
+      "    if(arguments.length>=2&&arguments[1]===0&&uy>100)return;",
+      "    return o.apply(window,arguments);",
+      "  };",
+      "  var o2=window.scroll.bind(window);",
+      "  window.scroll=function(){",
+      "    if(arguments.length>=2&&arguments[1]===0&&uy>100)return;",
+      "    return o2.apply(window,arguments);",
+      "  };",
+      "  var osi=Element.prototype.scrollIntoView;",
+      "  Element.prototype.scrollIntoView=function(){",
+      "    var r=this.getBoundingClientRect();",
+      "    if(r.top>-10&&r.top<10&&uy>100)return;",
+      "    return osi.apply(this,arguments);",
+      "  };",
+      "  if('scrollRestoration'in history)history.scrollRestoration='manual';",
+      "  window.__antiIgScrollGuard=true;",
+      "})();"
+    ].join("\n");
+
+    // Try inline script first
+    const s = document.createElement("script");
+    s.id = "anti-ig-scroll-guard";
+    s.textContent = code;
+    (document.head || document.documentElement).appendChild(s);
+
+    // Fallback: if CSP blocked inline script, try blob URL
+    setTimeout(() => {
+      s.remove();
+      try {
+        const blob = new Blob([code], { type: "text/javascript" });
+        const url = URL.createObjectURL(blob);
+        const s2 = document.createElement("script");
+        s2.id = "anti-ig-scroll-guard";
+        s2.src = url;
+        s2.onload = () => URL.revokeObjectURL(url);
+        (document.head || document.documentElement).appendChild(s2);
+      } catch (e) {}
+    }, 200);
+  }
+
+  // ─── Content-script fallback: restore scroll if yanked to top ──────────
+  // If the page-world guard fails (CSP), this detects unexpected scroll-to-0
+  // and restores the user's position. Uses a flag to avoid infinite loops.
+  let lastGoodScrollY = 0;
+  let restoringScroll = false;
   window.addEventListener('scroll', () => {
-    userScrollY = window.scrollY;
+    if (restoringScroll) return;
+    if (window.scrollY > 100) {
+      lastGoodScrollY = window.scrollY;
+    } else if (window.scrollY <= 10 && lastGoodScrollY > 100 && enabled) {
+      restoringScroll = true;
+      const target = lastGoodScrollY;
+      lastGoodScrollY = 0;
+      window.scrollTo(0, target);
+      setTimeout(() => { restoringScroll = false; }, 200);
+    }
   }, { passive: true });
 
-  const origScrollTo = window.scrollTo.bind(window);
-  window.scrollTo = function(...args) {
-    // Block scrollTo(0, 0) if user has scrolled down
-    if (enabled && args.length >= 2 && args[1] === 0 && userScrollY > 100) {
-      return;
-    }
-    return origScrollTo(...args);
-  };
-
-  // ─── Click interception for posts and stories ──────────────────────────
+  // ─── Click interception for posts, stories, and "load more" ────────────
+  // Use capture phase to intercept clicks before Instagram's handlers.
+  // If the click hits an overlay div, find the real button underneath.
   document.addEventListener('click', (e) => {
     if (!enabled) return;
+
+    // If click landed on an overlay (not a button/link), try to find
+    // the real interactive element underneath
+    if (e.target.tagName === 'DIV' && !e.target.matches('button, a, [role="button"], input')) {
+      // Temporarily hide the overlay to find what's underneath
+      const target = e.target;
+      const origPE = target.style.pointerEvents;
+      target.style.pointerEvents = 'none';
+      const rect = target.getBoundingClientRect();
+      const realTarget = document.elementFromPoint(rect.left + rect.width/2, rect.top + rect.height/2);
+      target.style.pointerEvents = origPE;
+      
+      if (realTarget && realTarget !== target && 
+          (realTarget.matches('button, [role="button"]') || realTarget.closest('button, [role="button"]'))) {
+        const btn = realTarget.closest('button, [role="button"]') || realTarget;
+        btn.click();
+        e.preventDefault();
+        e.stopPropagation();
+        return;
+      }
+    }
 
     const link = e.target.closest('a[href]');
     if (link) {
@@ -263,6 +354,7 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
       document.documentElement.setAttribute("data-anti-ig", "on");
     }
     injectPageStyle();
+    injectScrollGuard();
     unlockScroll();
     if (document.querySelector('div[role="dialog"][aria-modal="true"], .x1h0vfkc')) {
       removeLoginWall();
@@ -273,6 +365,7 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
   function init() {
     if (document.body) {
       injectPageStyle();
+      injectScrollGuard();
       removeLoginWall();
       startObserver();
     } else {
