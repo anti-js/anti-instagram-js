@@ -45,3 +45,43 @@ html[data-anti-ig="on"] body > div[id^="mount_"] > div > div > div > div > div >
   max-height: none !important;
   overflow: visible !important;
 }
+
+/* Re-enable pointer-events on interactive elements even if a parent
+   overlay has pointer-events: none. Login wall dialogs are already
+   display:none so their buttons can't be clicked. */
+html[data-anti-ig="on"] a[href],
+html[data-anti-ig="on"] button,
+html[data-anti-ig="on"] [role="button"],
+html[data-anti-ig="on"] [role="link"],
+html[data-anti-ig="on"] input,
+html[data-anti-ig="on"] select,
+html[data-anti-ig="on"] textarea,
+html[data-anti-ig="on"] [role="slider"],
+html[data-anti-ig="on"] [role="tab"] {
+  pointer-events: auto !important;
+}
+
+/* Download button on post/reel pages */
+#anti-ig-dl-btn {
+  position: fixed !important;
+  z-index: 99999 !important;
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 50% !important;
+  background: rgba(0, 0, 0, 0.55) !important;
+  color: #fff !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  cursor: pointer !important;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
+  transition: opacity 0.2s, transform 0.2s, background 0.2s !important;
+  user-select: none !important;
+}
+#anti-ig-dl-btn:hover {
+  transform: scale(1.1) !important;
+  background: rgba(0, 149, 246, 0.85) !important;
+}
+@keyframes anti-ig-spin {
+  to { transform: rotate(360deg); }
+}

@@ -14,7 +14,10 @@ A browser extension that removes Instagram's login wall so you can browse profil
 - **Removes the dark backdrop** — gets rid of the dark overlay that blocks you from interacting with the page.
 - **Removes invisible click interceptors** — Instagram places invisible full-screen divs over posts to intercept clicks and trigger the login wall. Removed.
 - **Direct post navigation** — clicking a post navigates directly to the post URL instead of triggering Instagram's JS login wall.
+- **Direct profile navigation** — clicking a profile name on a post page navigates directly instead of showing a login wall.
 - **Unlocks scroll** — restores page scroll so you can browse the full profile.
+- **Download media** — a floating download button appears on post and reel pages. Click it to download photos (as JPG/PNG) or videos (as WebM). For carousel posts, it downloads the currently visible image.
+- **Exact timestamps** — relative times like "200 Wo." get a "~3.8y" suffix computed from the real date, a hover tooltip with the full exact date/time, and the post's own timestamp shows the exact upload date and time inline.
 - **On/Off toggle** — turn the whole thing off with one click if you want Instagram's default behavior back.
 - **Block counter** — keeps track of how many login walls have been bypassed. Reset it anytime.
 
@@ -51,7 +54,7 @@ All settings are saved automatically and apply immediately — no reload needed.
 ## Files
 
 - `manifest.json` — Extension manifest (Manifest V3)
-- `content.js` — Content script that removes login walls, backdrops, and click interceptors
+- `content.js` — Content script that removes login walls, backdrops, click interceptors, and adds the media download button
 - `styles.css` — CSS that hides login walls before they render
 - `background.js` — Background script that manages state and counter
 - `popup.html` / `popup.css` / `popup.js` — Popup UI with toggle and counter
@@ -69,4 +72,5 @@ All settings are saved automatically and apply immediately — no reload needed.
 - This is for personal use. It bypasses Instagram's login wall, so use it responsibly.
 - Instagram may change their DOM structure at any time, which could break the extension. If something stops working, check back for updates.
 - Stories cannot be viewed without logging in — Instagram requires authentication at the server level for story content.
+- Video downloads use the `MediaRecorder` API to capture the playing video in real-time, so the video must play through once. Videos are saved as WebM format.
 - Works on Chromium-based browsers (Chrome, Brave, Edge) and Firefox/LibreWolf.

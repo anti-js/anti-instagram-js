@@ -23,6 +23,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "injectScrollGuard" && sender.tab) {
     injectScrollGuardInMainWorld(sender.tab.id);
   }
+  if (msg.action === "downloadMedia") {
+    chrome.downloads.download({
+      url: msg.url,
+      filename: msg.filename,
+      saveAs: false,
+    }, () => {
+      if (chrome.runtime.lastError) {
+        sendResponse({ success: false, error: chrome.runtime.lastError.message });
+      } else {
+        sendResponse({ success: true });
+      }
+    });
+    return true;
+  }
 });
 
 // Inject scroll guard into the page's MAIN world, bypassing CSP.
@@ -44,15 +58,42 @@ function injectScrollGuardInMainWorld(tabId) {
       if (userY > 50) lockedY = userY;
     }, { passive: true });
 
+    // Check if a scrollTo/scroll call targets the top of the page.
+    // Handles both positional form scrollTo(0, 0) and object form
+    // scrollTo({ top: 0 }) — Instagram uses the object form in newer builds.
+    function isScrollToTop(args) {
+      if (args.length >= 2 && args[1] <= 10 && userY > 50) return true;
+      if (args.length >= 1 && typeof args[0] === 'object' && args[0] !== null) {
+        var top = args[0].top;
+        if (top !== undefined && top <= 10 && userY > 50) return true;
+      }
+      return false;
+    }
+
     var o1 = window.scrollTo.bind(window);
     window.scrollTo = function () {
-      if (arguments.length >= 2 && arguments[1] === 0 && userY > 50) return;
+      if (isScrollToTop(arguments)) return;
       return o1.apply(window, arguments);
     };
     var o2 = window.scroll.bind(window);
     window.scroll = function () {
-      if (arguments.length >= 2 && arguments[1] === 0 && userY > 50) return;
+      if (isScrollToTop(arguments)) return;
       return o2.apply(window, arguments);
+    };
+
+    // Guard scrollBy — block large upward scrolls that would reach the top
+    var o3 = window.scrollBy.bind(window);
+    window.scrollBy = function () {
+      if (userY > 50) {
+        if (arguments.length >= 2 && arguments[1] < 0) {
+          if (userY + arguments[1] <= 10) return;
+        }
+        if (arguments.length >= 1 && typeof arguments[0] === 'object' && arguments[0] !== null) {
+          var top = arguments[0].top;
+          if (top !== undefined && top < 0 && userY + top <= 10) return;
+        }
+      }
+      return o3.apply(window, arguments);
     };
 
     var html = document.documentElement;
@@ -61,34 +102,56 @@ function injectScrollGuardInMainWorld(tabId) {
       try {
         Object.defineProperty(html, 'scrollTop', {
           get: function () { return desc.get.call(this); },
-          set: function (v) { if (v === 0 && userY > 50) return; desc.set.call(this, v); },
+          set: function (v) { if (v <= 10 && userY > 50) return; desc.set.call(this, v); },
           configurable: true
         });
       } catch (e) {}
     }
 
+    // Block scrollIntoView for elements at or above the viewport top.
+    // When the user is scrolled down, elements at the top of the document
+    // have negative r.top values — the old guard only checked -10..10,
+    // missing elements far above the viewport.
     var osi = Element.prototype.scrollIntoView;
     Element.prototype.scrollIntoView = function () {
       var r = this.getBoundingClientRect();
-      if (r.top > -10 && r.top < 10 && userY > 50) return;
+      if (r.top < 10 && userY > 50) return;
       return osi.apply(this, arguments);
     };
 
+    // WebKit-specific: scrollIntoViewIfNeeded
+    if (typeof Element.prototype.scrollIntoViewIfNeeded === 'function') {
+      var osin = Element.prototype.scrollIntoViewIfNeeded;
+      Element.prototype.scrollIntoViewIfNeeded = function () {
+        var r = this.getBoundingClientRect();
+        if (r.top < 10 && userY > 50) return;
+        return osin.apply(this, arguments);
+      };
+    }
+
+    // Block focus() on elements at or above the viewport top —
+    // focus() scrolls the element into view by default.
     var ofn = HTMLElement.prototype.focus;
     HTMLElement.prototype.focus = function () {
       var r = this.getBoundingClientRect();
-      if (r.top > -10 && r.top < 10 && userY > 50) return;
+      if (r.top < 10 && userY > 50) return;
       return ofn.apply(this, arguments);
     };
 
     if ('scrollRestoration' in history) history.scrollRestoration = 'manual';
 
+    // rAF fallback: detect sudden jumps to top (programmatic scroll).
+    // Use jump distance (prevY - scrollY) to distinguish user scrolling
+    // from programmatic scroll-to-top. A user wheel tick moves ~50-100px
+    // per frame; Instagram's programmatic scroll jumps 200+px to 0.
+    var prevY = 0;
     function rafLock() {
-      if (userY > 50 && window.scrollY < 10) {
+      if (userY > 50 && window.scrollY < 10 && prevY - window.scrollY > 200 && !restoring) {
         restoring = true;
         o1(0, lockedY > 0 ? lockedY : userY);
         setTimeout(function () { restoring = false; }, 50);
       }
+      prevY = window.scrollY;
       requestAnimationFrame(rafLock);
     }
     requestAnimationFrame(rafLock);

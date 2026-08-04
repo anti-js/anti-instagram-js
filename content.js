@@ -86,6 +86,43 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
       html[data-anti-ig="on"] .xg6iff7.xippug5 {
         pointer-events: none !important;
       }
+      /* Re-enable pointer-events on interactive elements even if a
+         parent overlay has pointer-events: none. Login wall dialogs
+         are already display:none so their buttons can't be clicked. */
+      html[data-anti-ig="on"] a[href],
+      html[data-anti-ig="on"] button,
+      html[data-anti-ig="on"] [role="button"],
+      html[data-anti-ig="on"] [role="link"],
+      html[data-anti-ig="on"] input,
+      html[data-anti-ig="on"] select,
+      html[data-anti-ig="on"] textarea,
+      html[data-anti-ig="on"] [role="slider"],
+      html[data-anti-ig="on"] [role="tab"] {
+        pointer-events: auto !important;
+      }
+      #anti-ig-dl-btn {
+        position: fixed !important;
+        z-index: 99999 !important;
+        width: 36px !important;
+        height: 36px !important;
+        border-radius: 50% !important;
+        background: rgba(0, 0, 0, 0.55) !important;
+        color: #fff !important;
+        display: flex !important;
+        align-items: center !important;
+        justify-content: center !important;
+        cursor: pointer !important;
+        box-shadow: 0 2px 8px rgba(0,0,0,0.4) !important;
+        transition: opacity 0.2s, transform 0.2s, background 0.2s !important;
+        user-select: none !important;
+      }
+      #anti-ig-dl-btn:hover {
+        transform: scale(1.1) !important;
+        background: rgba(0, 149, 246, 0.85) !important;
+      }
+      @keyframes anti-ig-spin {
+        to { transform: rotate(360deg); }
+      }
     `;
     (document.head || document.documentElement).appendChild(s);
   }
@@ -131,39 +168,75 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
       blocked = true;
     });
 
+    // 2b) Hide any fixed/absolute overlay div that contains login wall text.
+    //     This catches login walls that aren't role="dialog" elements —
+    //     Instagram uses different overlay patterns on post pages (fixed
+    //     div with z-index:20 nested inside <main>, no role, no #scrollview).
+    //     IMPORTANT: Skip divs that contain real content (main, article,
+    //     post links, images) — the #scrollview content container has
+    //     position:fixed and includes nav bar "Anmelden"/"Registrieren"
+    //     text, but hiding it would hide the entire page content.
+    document.querySelectorAll('div').forEach(d => {
+      const style = window.getComputedStyle(d);
+      if (style.position !== 'fixed' && style.position !== 'absolute') return;
+      if (style.display === 'none') return;
+      const rect = d.getBoundingClientRect();
+      if (rect.width < window.innerWidth * 0.5 || rect.height < 200) return;
+      // Skip divs that contain real content — they're not pure overlays.
+      // Use strong indicators (main, article, video) — NOT img or post
+      // links, because login wall overlays contain a profile pic <img>
+      // and an intent:// link with /p/ in the URL.
+      if (d.querySelector('main, article, video')) return;
+      if (isLoginWall(d)) {
+        hideElement(d);
+        blocked = true;
+      }
+    });
+
     // 3) Neutralize specific click interceptors by class name only.
     //    Do NOT broadly scan all divs — that blocks the main content container.
     document.querySelectorAll('.x1qjc9v5.x9f619.x78zum5.xdt5ytf.x1iyjqo2.xl56j7k, .x1uvtmcs, .xg6iff7.xippug5').forEach(d => {
       if (d && d.style) d.style.setProperty("pointer-events", "none", "important");
     });
-    // Re-enable pointer-events on #scrollview content container
+    // Re-enable pointer-events on #scrollview content container.
     // There are TWO #scrollview divs — one contains the page content,
-    // the other is an overlay. Disable the overlay and its children,
-    // enable the content one.
+    // the other is an overlay. The content one has real interactive
+    // elements or media; the overlay one doesn't.
+    // We only disable the overlay container itself — NOT its children.
+    // pointer-events:none on the container makes it transparent to
+    // clicks so they pass through to content below.
     document.querySelectorAll('#scrollview').forEach(sv => {
-      if (sv.querySelector('a[href*="/p/"], main, article')) {
+      if (sv.querySelector('a[href], button, [role="button"], [role="link"], img, video, main, article')) {
         sv.style.setProperty("pointer-events", "auto", "important");
       } else {
         sv.style.setProperty("pointer-events", "none", "important");
-        sv.querySelectorAll('*').forEach(child => {
-          child.style.setProperty("pointer-events", "none", "important");
-        });
       }
     });
     // Also disable overlay divs that are OUTSIDE #scrollview —
     // Instagram adds separate overlay layers (x1n2onr6.xzkaem6 chain)
     // that cover the viewport and intercept clicks on lower posts.
+    // We only disable the overlay div itself — NOT its children.
+    // pointer-events:none makes the div transparent to clicks so they
+    // pass through to content below. Disabling children breaks real
+    // content that might be nested inside.
     if (document.body) {
       document.body.querySelectorAll(':scope > div, :scope > div > div').forEach(d => {
         if (d.closest('#scrollview')) return;
         if (d.id && d.id.startsWith('mount_')) return;
         const rect = d.getBoundingClientRect();
         if (rect.width < window.innerWidth * 0.5 || rect.height < 200) return;
-        if (d.querySelector('a[href*="/p/"], a[href*="/accounts/"], button, main, nav, [role="navigation"], [role="main"]')) return;
+        // If the div is a login wall, hide it even if it contains buttons
+        // (the buttons are login wall buttons like "Schließen", "Registrieren").
+        // But skip divs that contain real content (main, article, video) —
+        // those are content containers with nav bar login text, not overlays.
+        if (d.querySelector('main, article, video')) return;
+        if (isLoginWall(d)) {
+          hideElement(d);
+          blocked = true;
+          return;
+        }
+        if (d.querySelector('a[href], button, [role="button"], [role="link"], img, video, main, nav, [role="navigation"], [role="main"]')) return;
         d.style.setProperty("pointer-events", "none", "important");
-        d.querySelectorAll('*').forEach(child => {
-          child.style.setProperty("pointer-events", "none", "important");
-        });
       });
     }
 
@@ -213,28 +286,32 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
   // ─── Content-script fallback: rAF scroll lock + event-based restore ────
   // Runs in the content script's isolated world as a fallback in case
   // the page-world <script> injection is blocked by CSP.
+  // Uses jump distance (prevScrollY - y) to distinguish user-initiated
+  // scroll-to-top from Instagram's sudden programmatic scroll-to-top:
+  // if scrollY jumps 200+px to <=10 in a single frame, it's programmatic.
   let lastGoodScrollY = 0;
+  let prevScrollY = 0;
   let restoringScroll = false;
   window.addEventListener('scroll', () => {
     if (restoringScroll) return;
     if (window.scrollY > 50) {
       lastGoodScrollY = window.scrollY;
-    } else if (window.scrollY <= 10 && lastGoodScrollY > 50 && enabled) {
-      restoringScroll = true;
-      const target = lastGoodScrollY;
-      lastGoodScrollY = 0;
-      window.scrollTo(0, target);
-      setTimeout(() => { restoringScroll = false; }, 100);
     }
   }, { passive: true });
 
-  // rAF-based fallback: check every frame if scroll was yanked to top
+  // rAF-based fallback: check every frame if scroll was yanked to top.
+  // Use jump distance (prevScrollY - y) to distinguish user scrolling
+  // from programmatic scroll-to-top. A user wheel tick moves ~50-100px
+  // per frame; Instagram's programmatic scroll jumps 200+px to 0.
   function rafFallback() {
-    if (enabled && lastGoodScrollY > 50 && window.scrollY <= 10 && !restoringScroll) {
-      restoringScroll = true;
-      const target = lastGoodScrollY;
-      window.scrollTo(0, target);
-      setTimeout(() => { restoringScroll = false; }, 100);
+    if (enabled && !restoringScroll) {
+      const y = window.scrollY;
+      if (y <= 10 && lastGoodScrollY > 50 && prevScrollY - y > 200) {
+        restoringScroll = true;
+        window.scrollTo(0, lastGoodScrollY);
+        setTimeout(() => { restoringScroll = false; }, 150);
+      }
+      prevScrollY = y;
     }
     requestAnimationFrame(rafFallback);
   }
@@ -250,7 +327,19 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     const link = e.target.closest('a[href]');
     if (link) {
       const href = link.getAttribute('href') || '';
+      // Post links: /username/p/XXX/ or /p/XXX/
       if (href.match(/^\/[^/]+\/p\//) || href.match(/^\/p\//)) {
+        e.preventDefault();
+        e.stopPropagation();
+        window.location.href = href;
+        return;
+      }
+      // Profile links: /username/ — Instagram intercepts these to show
+      // a login wall. Navigate directly to bypass it.
+      // Exclude non-profile paths that also have a single segment.
+      const SPECIAL_PATHS = /^(accounts|explore|direct|stories|reel|reels|tags|about|developer|legal|help|press|api|graphql|notifications|settings|emails|oauth|data|business|creator|community|directory|web|p|videos)\b/;
+      const profileMatch = href.match(/^\/([^/]+)\/?$/);
+      if (profileMatch && !SPECIAL_PATHS.test(profileMatch[1])) {
         e.preventDefault();
         e.stopPropagation();
         window.location.href = href;
@@ -282,13 +371,26 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
           unlockScroll();
         }
       }
-      // Check for new dialog/scrim nodes
+      // Check for new dialog/scrim/login-wall nodes
       if (m.addedNodes) {
         for (const node of m.addedNodes) {
           if (node.nodeType !== 1) continue;
           if (node.getAttribute?.('role') === 'dialog' ||
               node.classList?.contains('x1h0vfkc') ||
-              node.querySelector?.('[role="dialog"], .x1h0vfkc')) {
+              node.classList?.contains('xzkaem6') ||
+              node.querySelector?.('[role="dialog"], .x1h0vfkc, .xzkaem6') ||
+              isLoginWall(node)) {
+            shouldCheck = true;
+            break;
+          }
+        }
+      }
+      // Also check for media changes (carousel navigation, new post content)
+      if (!shouldCheck && m.addedNodes) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType !== 1) continue;
+          if (node.tagName === 'IMG' || node.tagName === 'VIDEO' ||
+              node.querySelector?.('img, video, article')) {
             shouldCheck = true;
             break;
           }
@@ -298,7 +400,10 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     }
     if (shouldCheck) {
       clearTimeout(debounceTimer);
-      debounceTimer = setTimeout(removeLoginWall, 50);
+      debounceTimer = setTimeout(() => {
+        removeLoginWall();
+        updateDlBtn();
+      }, 50);
     }
   });
 
@@ -336,7 +441,383 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     if (document.querySelector('div[role="dialog"][aria-modal="true"], .x1h0vfkc')) {
       removeLoginWall();
     }
+    updateDlBtn();
   }, 1000);
+
+  // ─── Media download button ────────────────────────────────────────────
+  // The button is position:fixed on document.body (NOT inside the media
+  // container) so it survives Instagram's DOM re-renders. Its position
+  // is calculated from the media container's bounding rect and updated
+  // on scroll, resize, and via the polling interval.
+  let dlBtn = null;
+  let dlBusy = false;
+
+  function isPostPage() {
+    const p = window.location.pathname;
+    return /\/p\//.test(p) || /\/reel\//.test(p) || /\/reels\//.test(p);
+  }
+
+  function getPostId() {
+    const m = window.location.pathname.match(/\/(p|reel|reels)\/([^/]+)/);
+    return m ? m[2] : 'post';
+  }
+
+  // Track the last media element we attached to so the button doesn't
+  // jump between candidates (e.g. suggested-post thumbnails) on scroll.
+  let lastMediaEl = null;
+
+  // The actually-visible rect of an element: its bounding rect intersected
+  // with every clipping ancestor (overflow != visible) and the viewport.
+  // getBoundingClientRect alone ignores overflow clipping, which is why
+  // carousel slides hidden outside the overflow:hidden frame still report a
+  // large "visible" area — the button then lands on a clipped-off photo,
+  // fully outside the picture to the left/right.
+  function visibleRectOf(el) {
+    const r = el.getBoundingClientRect();
+    let left = r.left, top = r.top, right = r.right, bottom = r.bottom;
+    let cur = el.parentElement;
+    while (cur && cur !== document.documentElement) {
+      const style = window.getComputedStyle(cur);
+      if (style.overflowX !== 'visible' || style.overflowY !== 'visible') {
+        const cr = cur.getBoundingClientRect();
+        if (style.overflowX !== 'visible') {
+          left = Math.max(left, cr.left);
+          right = Math.min(right, cr.right);
+        }
+        if (style.overflowY !== 'visible') {
+          top = Math.max(top, cr.top);
+          bottom = Math.min(bottom, cr.bottom);
+        }
+      }
+      cur = cur.parentElement;
+    }
+    left = Math.max(left, 0);
+    top = Math.max(top, 0);
+    right = Math.min(right, window.innerWidth);
+    bottom = Math.min(bottom, window.innerHeight);
+    return {
+      left, top, right, bottom,
+      width: Math.max(0, right - left),
+      height: Math.max(0, bottom - top)
+    };
+  }
+
+  function visibleAreaOf(el) {
+    const r = visibleRectOf(el);
+    return r.width * r.height;
+  }
+
+  // Find the main visible media element and its container on a post page.
+  function findMainMedia() {
+    // Prefer the post <article> so suggested-post/related images elsewhere
+    // in <main> can't win the "largest visible image" contest.
+    const scope = document.querySelector('article') ||
+      document.querySelector('main, [role="main"]') || document;
+    const candidates = scope.querySelectorAll('img');
+    let bestImg = null;
+    let bestVisibleArea = 0;
+    candidates.forEach(img => {
+      const rect = img.getBoundingClientRect();
+      if (rect.width < 100 || rect.height < 100) return;
+      const style = window.getComputedStyle(img);
+      if (style.display === 'none' || style.visibility === 'hidden') return;
+      const visibleArea = visibleAreaOf(img);
+      if (visibleArea > bestVisibleArea) {
+        bestVisibleArea = visibleArea;
+        bestImg = img;
+      }
+    });
+
+    // Pick the video with the largest actually-visible area — the first
+    // <video> in the DOM may be a clipped-off carousel slide.
+    let video = null;
+    let bestVideoArea = 0;
+    scope.querySelectorAll('video').forEach(v => {
+      const rect = v.getBoundingClientRect();
+      if (rect.width < 100 || rect.height < 100) return;
+      const a = visibleAreaOf(v);
+      if (a > bestVideoArea) { bestVideoArea = a; video = v; }
+    });
+    if (!video) video = document.querySelector('main video, [role="main"] video');
+
+    // Sticky selection: if the previously tracked media is still in the DOM
+    // and meaningfully visible (clip-aware — a carousel slide that slid out
+    // of the overflow:hidden frame does NOT count), keep it instead of
+    // jumping to another candidate.
+    const lastVisible = lastMediaEl && lastMediaEl.isConnected
+      ? visibleRectOf(lastMediaEl) : null;
+    if (!(lastVisible && lastVisible.width >= 100 && lastVisible.height >= 100 &&
+          lastVisible.width * lastVisible.height > 100 * 100)) {
+      lastMediaEl = bestVideoArea > bestVisibleArea ? video : (bestImg || video);
+    }
+
+    return { image: bestImg, video, mediaEl: lastMediaEl };
+  }
+
+  function getBestImageUrl(img) {
+    const srcset = img.getAttribute('srcset');
+    if (srcset) {
+      const entries = srcset.split(',').map(s => {
+        const parts = s.trim().split(/\s+/);
+        return { url: parts[0], width: parts[1] ? parseInt(parts[1]) : 0 };
+      });
+      entries.sort((a, b) => b.width - a.width);
+      if (entries.length > 0 && entries[0].url) return entries[0].url;
+    }
+    return img.src;
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function downloadImage(img) {
+    const url = getBestImageUrl(img);
+    if (!url) return;
+    try {
+      chrome.runtime.sendMessage({
+        action: "downloadMedia",
+        url: url,
+        filename: `instagram_${getPostId()}.jpg`,
+      });
+    } catch (e) {
+      window.open(url, '_blank');
+    }
+  }
+
+  function downloadVideo(video) {
+    if (!video) return;
+    dlBusy = true;
+    updateDlBtnState();
+    try {
+      const stream = video.captureStream ? video.captureStream()
+        : video.mozCaptureStream ? video.mozCaptureStream() : null;
+      if (!stream) throw new Error('captureStream not supported');
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
+        ? 'video/webm;codecs=vp9,opus'
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
+          ? 'video/webm;codecs=vp8,opus' : 'video/webm';
+      const recorder = new MediaRecorder(stream, { mimeType });
+      const chunks = [];
+      recorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
+      recorder.onstop = () => {
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        downloadBlob(blob, `instagram_${getPostId()}.webm`);
+        dlBusy = false;
+        updateDlBtnState();
+      };
+      recorder.onerror = () => { dlBusy = false; updateDlBtnState(); };
+      const prevMuted = video.muted;
+      const prevVolume = video.volume;
+      video.muted = true;
+      video.volume = 0;
+      video.currentTime = 0;
+      video.play().then(() => {
+        recorder.start();
+        const onEnded = () => {
+          if (recorder.state !== 'inactive') recorder.stop();
+          video.muted = prevMuted;
+          video.volume = prevVolume;
+          video.removeEventListener('ended', onEnded);
+        };
+        video.addEventListener('ended', onEnded);
+      }).catch(() => { dlBusy = false; updateDlBtnState(); });
+    } catch (e) { dlBusy = false; updateDlBtnState(); }
+  }
+
+  function updateDlBtnState() {
+    if (!dlBtn) return;
+    if (dlBusy) {
+      dlBtn.style.opacity = '0.6';
+      dlBtn.style.pointerEvents = 'none';
+      dlBtn.querySelector('.dl-icon').style.display = 'none';
+      dlBtn.querySelector('.dl-spinner').style.display = 'inline-block';
+    } else {
+      dlBtn.style.opacity = '1';
+      dlBtn.style.pointerEvents = 'auto';
+      dlBtn.querySelector('.dl-icon').style.display = 'inline-block';
+      dlBtn.querySelector('.dl-spinner').style.display = 'none';
+    }
+  }
+
+  function positionDlBtn(mediaEl) {
+    if (!dlBtn || !mediaEl) return;
+    const margin = 8;
+    const btnSize = 36;
+    // Actually-visible portion of the media (clip- and viewport-aware).
+    const vis = visibleRectOf(mediaEl);
+    const right = vis.right;
+    const bottom = vis.bottom;
+    // Only show the button if it fits fully inside the visible area —
+    // otherwise it would stick out past the edge of the picture.
+    if (vis.width < btnSize + margin * 2 || vis.height < btnSize + margin * 2) {
+      dlBtn.style.display = 'none';
+      return;
+    }
+    dlBtn.style.display = 'flex';
+    // Desired button position in viewport coordinates (bottom-right of media).
+    const desiredLeft = right - margin - btnSize;
+    const desiredTop = bottom - margin - btnSize;
+    // position:fixed is relative to the viewport ONLY if no ancestor has a
+    // transform/filter/perspective — Instagram applies transforms to body
+    // in several flows (scroll-lock, modals, transitions), which silently
+    // changes the button's containing block and throws viewport math off.
+    // Instead of guessing the containing block: set left/top, measure where
+    // the button actually landed, and correct the offset. Works for any
+    // containing block, transformed or not.
+    dlBtn.style.left = desiredLeft + 'px';
+    dlBtn.style.top = desiredTop + 'px';
+    dlBtn.style.right = 'auto';
+    dlBtn.style.bottom = 'auto';
+    const actual = dlBtn.getBoundingClientRect();
+    const dx = desiredLeft - actual.left;
+    const dy = desiredTop - actual.top;
+    if (dx !== 0 || dy !== 0) {
+      dlBtn.style.left = (desiredLeft + dx) + 'px';
+      dlBtn.style.top = (desiredTop + dy) + 'px';
+    }
+  }
+
+  function createDlBtn() {
+    if (dlBtn) return;
+    dlBtn = document.createElement('div');
+    dlBtn.id = 'anti-ig-dl-btn';
+    dlBtn.innerHTML = `
+      <svg class="dl-icon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+        <polyline points="7 10 12 15 17 10"/>
+        <line x1="12" y1="15" x2="12" y2="3"/>
+      </svg>
+      <svg class="dl-spinner" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="display:none;animation:anti-ig-spin 1s linear infinite;">
+        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+      </svg>
+    `;
+    dlBtn.title = 'Download media';
+    dlBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (dlBusy) return;
+      const { image, video } = findMainMedia();
+      if (video && video.readyState >= 2) {
+        downloadVideo(video);
+      } else if (image) {
+        downloadImage(image);
+      }
+    });
+    document.body.appendChild(dlBtn);
+  }
+
+  function removeDlBtn() {
+    if (dlBtn) { dlBtn.remove(); dlBtn = null; }
+    lastMediaEl = null;
+  }
+
+  function updateDlBtn() {
+    if (!enabled || !isPostPage()) { removeDlBtn(); return; }
+    const { mediaEl } = findMainMedia();
+    if (!mediaEl) {
+      if (dlBtn) dlBtn.style.display = 'none';
+      return;
+    }
+    if (!dlBtn) createDlBtn();
+    if (dlBtn) {
+      dlBtn.style.display = 'flex';
+      positionDlBtn(mediaEl);
+      updateDlBtnState();
+    }
+  }
+
+  // Keep button aligned with media on scroll and resize
+  window.addEventListener('scroll', () => {
+    if (dlBtn && dlBtn.style.display !== 'none') {
+      const { mediaEl } = findMainMedia();
+      if (mediaEl) positionDlBtn(mediaEl);
+    }
+  }, { passive: true });
+  window.addEventListener('resize', () => {
+    if (dlBtn && dlBtn.style.display !== 'none') {
+      const { mediaEl } = findMainMedia();
+      if (mediaEl) positionDlBtn(mediaEl);
+    }
+  }, { passive: true });
+
+  // ─── Timestamp enhancement ───────────────────────────────────────────
+  // Instagram shows relative times ("200 Wo.", "37 w") on comments and the
+  // post itself. The exact instant is always in <time datetime="...ISO...">,
+  // so ages can be computed precisely and locale-independently:
+  //  - every timestamp gets a hover tooltip with the full exact date/time
+  //  - timestamps older than ~1 month get a "~X.Xy" / "~Xmo" suffix
+  //  - the post's own timestamp (last <time> in the document — the post
+  //    date row sits below the comments) also gets the full exact upload
+  //    date shown inline, right where the relative date is
+  function enhanceTimestamps() {
+    if (!enabled || !isPostPage()) return;
+    // Note: real Instagram post pages have NO <article> element — comment
+    // and post timestamps sit directly in the document. Don't scope to one.
+    const times = document.querySelectorAll('time[datetime]');
+    times.forEach((t, i) => {
+      const dt = new Date(t.getAttribute('datetime'));
+      if (isNaN(dt.getTime())) return;
+      const full = dt.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'short' });
+      if (t.title !== full) t.title = full;
+      if (!t.querySelector('.anti-ig-yrs')) {
+        const years = (Date.now() - dt.getTime()) / (365.25 * 24 * 3600 * 1000);
+        let label = null;
+        if (years >= 1) label = `~${years.toFixed(1)}y`;
+        else if (years >= 1 / 12) label = `~${Math.round(years * 12)}mo`;
+        if (label) {
+          const s = document.createElement('span');
+          s.className = 'anti-ig-yrs';
+          s.style.cssText = 'opacity:0.65;margin-left:4px;white-space:nowrap;';
+          s.textContent = `· ${label}`;
+          t.appendChild(s);
+        }
+      }
+      // Full exact date+time on the post's own timestamp (last <time> in
+      // the document — the post date row sits below the comments). If
+      // Instagram already shows the date (4-digit year present), only add
+      // the exact time of day; otherwise add the full localized datetime.
+      if (i === times.length - 1 && !t.querySelector('.anti-ig-full-date')) {
+        const label = /\d{4}/.test(t.textContent)
+          ? dt.toLocaleTimeString(undefined, { timeStyle: 'short' })
+          : full;
+        const s = document.createElement('span');
+        s.className = 'anti-ig-full-date';
+        s.style.cssText = 'opacity:0.85;margin-left:6px;white-space:nowrap;';
+        s.textContent = `· ${label}`;
+        t.appendChild(s);
+      }
+    });
+  }
+
+  // Fast polling for carousel navigation — Instagram slides images via
+  // CSS transforms without adding new DOM nodes, so MutationObserver
+  // doesn't catch it. Poll at 300ms to detect the visible image change.
+  setInterval(() => {
+    if (!enabled) return;
+    updateDlBtn();
+    enhanceTimestamps();
+  }, 300);
+
+  // Also catch carousel nav button clicks for immediate update
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[aria-label]');
+    if (!btn) return;
+    const label = (btn.getAttribute('aria-label') || '').toLowerCase();
+    if (label.includes('next') || label.includes('prev') ||
+        label.includes('weiter') || label.includes('zurück') ||
+        label.includes('suivant') || label.includes('précédent')) {
+      setTimeout(updateDlBtn, 50);
+      setTimeout(updateDlBtn, 300);
+    }
+  }, true);
 
   // ─── Initial run — wait until body exists (script runs at document_start)
   function init() {

@@ -1,14 +1,14 @@
 {
   "manifest_version": 3,
   "name": "Anti Instagram Login",
-  "version": "1.0.0",
-  "description": "Removes Instagram's login wall so you can view profiles and posts without logging in.",
+  "version": "1.2.0",
+  "description": "Removes Instagram's login wall so you can view profiles and posts without logging in. Includes a download button for photos and videos on post pages, plus exact dates on all timestamps.",
   "icons": {
     "48": "icons/icon48.png",
     "128": "icons/icon128.png"
   },
-  "permissions": ["storage", "scripting"],
-  "host_permissions": ["*://*.instagram.com/*"],
+  "permissions": ["storage", "scripting", "downloads"],
+  "host_permissions": ["*://*.instagram.com/*", "*://*.cdninstagram.com/*", "*://*.fbcdn.net/*"],
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
