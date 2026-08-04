@@ -8,10 +8,14 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
 
   let enabled = true;
   let blockedCount = 0;
+  let downloadBtnEnabled = true;
+  let timestampsEnabled = true;
 
-  chrome.storage.local.get(["enabled", "blockedCount"], (data) => {
+  chrome.storage.local.get(["enabled", "blockedCount", "downloadBtn", "timestamps"], (data) => {
     enabled = data.enabled !== false;
     blockedCount = data.blockedCount || 0;
+    downloadBtnEnabled = data.downloadBtn !== false;
+    timestampsEnabled = data.timestamps !== false;
     if (enabled) {
       document.documentElement.setAttribute("data-anti-ig", "on");
     }
@@ -29,6 +33,14 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
         const s = document.getElementById("anti-ig-style");
         if (s) s.remove();
       }
+    }
+    if (changes.downloadBtn) {
+      downloadBtnEnabled = changes.downloadBtn.newValue !== false;
+      if (!downloadBtnEnabled) removeDlBtn();
+    }
+    if (changes.timestamps) {
+      timestampsEnabled = changes.timestamps.newValue !== false;
+      if (!timestampsEnabled) stripTimestampEnhancements();
     }
   });
 
@@ -720,7 +732,7 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
   }
 
   function updateDlBtn() {
-    if (!enabled || !isPostPage()) { removeDlBtn(); return; }
+    if (!enabled || !downloadBtnEnabled || !isPostPage()) { removeDlBtn(); return; }
     const { mediaEl } = findMainMedia();
     if (!mediaEl) {
       if (dlBtn) dlBtn.style.display = 'none';
@@ -757,8 +769,13 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
   //  - the post's own timestamp (last <time> in the document — the post
   //    date row sits below the comments) also gets the full exact upload
   //    date shown inline, right where the relative date is
+  function stripTimestampEnhancements() {
+    document.querySelectorAll('.anti-ig-yrs, .anti-ig-full-date').forEach(s => s.remove());
+    document.querySelectorAll('time[datetime]').forEach(t => t.removeAttribute('title'));
+  }
+
   function enhanceTimestamps() {
-    if (!enabled || !isPostPage()) return;
+    if (!enabled || !timestampsEnabled || !isPostPage()) return;
     // Note: real Instagram post pages have NO <article> element — comment
     // and post timestamps sit directly in the document. Don't scope to one.
     const times = document.querySelectorAll('time[datetime]');
