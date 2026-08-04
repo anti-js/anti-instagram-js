@@ -32,14 +32,16 @@ A browser extension that removes Instagram's login wall so you can browse profil
 
 ## How to install (Firefox / LibreWolf)
 
+Firefox doesn't support MV3 background service workers, so it needs its own manifest — the build script handles that for you:
+
 1. Download or clone this repo
-2. Zip the contents of the folder (the `manifest.json` must be at the root of the zip, not inside a subfolder)
+2. Run `./build-firefox-zip.sh` — it creates `anti-instagram-js-firefox.zip` with the Firefox manifest (`manifest.firefox.json`) swapped in
 3. Open `about:debugging#/runtime/this-firefox`
 4. Click **Load Temporary Add-on**
 5. Select the `.zip` file you created
 6. Done — visit any Instagram profile
 
-> **Note for Flatpak users:** If you're running Firefox or LibreWolf as a Flatpak, loading `manifest.json` directly won't work due to sandbox restrictions. Use the `.zip` method above instead.
+> **Note:** The GitHub "Download ZIP" won't work — Firefox needs `manifest.json` at the zip root, and GitHub nests everything in a folder. Always use the build script. Temporary add-ons are removed on browser restart, so reload the zip after restarting Firefox.
 
 ## Using the popup
 
@@ -53,7 +55,9 @@ All settings are saved automatically and apply immediately — no reload needed.
 
 ## Files
 
-- `manifest.json` — Extension manifest (Manifest V3)
+- `manifest.json` — Extension manifest (Manifest V3, Chrome)
+- `manifest.firefox.json` — Firefox manifest variant (uses `background.scripts` instead of `background.service_worker`)
+- `build-firefox-zip.sh` — Builds the Firefox install zip
 - `content.js` — Content script that removes login walls, backdrops, click interceptors, and adds the media download button
 - `styles.css` — CSS that hides login walls before they render
 - `background.js` — Background script that manages state and counter
