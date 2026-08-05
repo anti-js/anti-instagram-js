@@ -32,6 +32,8 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
         document.documentElement.removeAttribute("data-anti-ig");
         const s = document.getElementById("anti-ig-style");
         if (s) s.remove();
+        removeDlBtn();
+        stripTimestampEnhancements();
       }
     }
     if (changes.downloadBtn) {
@@ -120,7 +122,9 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
         border-radius: 50% !important;
         background: rgba(0, 0, 0, 0.55) !important;
         color: #fff !important;
-        display: flex !important;
+        /* No !important on display — inline display:none must be able to
+           hide the button (media scrolled away / feature toggled off). */
+        display: flex;
         align-items: center !important;
         justify-content: center !important;
         cursor: pointer !important;
@@ -519,6 +523,16 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     return r.width * r.height;
   }
 
+  // Suggested/related post thumbnails are always wrapped in a link to a
+  // DIFFERENT post (/p/... or /reel/...). The current post's media never
+  // is. This is how we keep the button glued to the viewed post only.
+  function isSuggestedMedia(el) {
+    const link = el.closest('a[href]');
+    if (!link) return false;
+    const m = (link.getAttribute('href') || '').match(/\/(p|reel|reels)\/([^/]+)/);
+    return !!m && m[2] !== getPostId();
+  }
+
   // Find the main visible media element and its container on a post page.
   function findMainMedia() {
     // Prefer the post <article> so suggested-post/related images elsewhere
@@ -531,6 +545,7 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     candidates.forEach(img => {
       const rect = img.getBoundingClientRect();
       if (rect.width < 100 || rect.height < 100) return;
+      if (isSuggestedMedia(img)) return;
       const style = window.getComputedStyle(img);
       if (style.display === 'none' || style.visibility === 'hidden') return;
       const visibleArea = visibleAreaOf(img);
@@ -547,16 +562,21 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     scope.querySelectorAll('video').forEach(v => {
       const rect = v.getBoundingClientRect();
       if (rect.width < 100 || rect.height < 100) return;
+      if (isSuggestedMedia(v)) return;
       const a = visibleAreaOf(v);
       if (a > bestVideoArea) { bestVideoArea = a; video = v; }
     });
-    if (!video) video = document.querySelector('main video, [role="main"] video');
+    if (!video) {
+      const fallback = document.querySelector('main video, [role="main"] video');
+      if (fallback && !isSuggestedMedia(fallback)) video = fallback;
+    }
 
     // Sticky selection: if the previously tracked media is still in the DOM
     // and meaningfully visible (clip-aware — a carousel slide that slid out
     // of the overflow:hidden frame does NOT count), keep it instead of
     // jumping to another candidate.
-    const lastVisible = lastMediaEl && lastMediaEl.isConnected
+    const lastVisible = lastMediaEl && lastMediaEl.isConnected &&
+      !isSuggestedMedia(lastMediaEl)
       ? visibleRectOf(lastMediaEl) : null;
     if (!(lastVisible && lastVisible.width >= 100 && lastVisible.height >= 100 &&
           lastVisible.width * lastVisible.height > 100 * 100)) {

@@ -70,7 +70,9 @@ html[data-anti-ig="on"] [role="tab"] {
   border-radius: 50% !important;
   background: rgba(0, 0, 0, 0.55) !important;
   color: #fff !important;
-  display: flex !important;
+  /* No !important on display — inline display:none must be able to
+     hide the button (media scrolled away / feature toggled off). */
+  display: flex;
   align-items: center !important;
   justify-content: center !important;
   cursor: pointer !important;
