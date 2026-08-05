@@ -10,12 +10,14 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
   let blockedCount = 0;
   let downloadBtnEnabled = true;
   let timestampsEnabled = true;
+  let downloadCount = 0;
 
-  chrome.storage.local.get(["enabled", "blockedCount", "downloadBtn", "timestamps"], (data) => {
+  chrome.storage.local.get(["enabled", "blockedCount", "downloadBtn", "timestamps", "downloadCount"], (data) => {
     enabled = data.enabled !== false;
     blockedCount = data.blockedCount || 0;
     downloadBtnEnabled = data.downloadBtn !== false;
     timestampsEnabled = data.timestamps !== false;
+    downloadCount = data.downloadCount || 0;
     if (enabled) {
       document.documentElement.setAttribute("data-anti-ig", "on");
     }
@@ -454,6 +456,7 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     injectPageStyle();
     injectScrollGuard();
     unlockScroll();
+    setupProfilePicDownload();
     if (document.querySelector('div[role="dialog"][aria-modal="true"], .x1h0vfkc')) {
       removeLoginWall();
     }
@@ -467,6 +470,12 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
   // on scroll, resize, and via the polling interval.
   let dlBtn = null;
   let dlBusy = false;
+  let activeRecording = null; // { stop() } while a video recording is running
+
+  function incrementDownloadCount() {
+    downloadCount++;
+    chrome.storage.local.set({ downloadCount });
+  }
 
   function isPostPage() {
     const p = window.location.pathname;
@@ -476,6 +485,15 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
   function getPostId() {
     const m = window.location.pathname.match(/\/(p|reel|reels)\/([^/]+)/);
     return m ? m[2] : 'post';
+  }
+
+  // Profile pages are a single non-reserved path segment ("/<username>").
+  function isProfilePage() {
+    if (isPostPage()) return false;
+    const seg = window.location.pathname.split('/').filter(Boolean);
+    if (seg.length !== 1) return false;
+    const reserved = ['explore', 'accounts', 'direct', 'stories', 'about', 'developer', 'legal'];
+    return !reserved.includes(seg[0]);
   }
 
   // Track the last media element we attached to so the button doesn't
@@ -610,18 +628,107 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
 
-  function downloadImage(img) {
+  // tag optionally customizes the filename (e.g. carousel index, username).
+  function downloadImage(img, tag) {
     const url = getBestImageUrl(img);
     if (!url) return;
-    try {
-      chrome.runtime.sendMessage({
-        action: "downloadMedia",
-        url: url,
-        filename: `instagram_${getPostId()}.jpg`,
-      });
-    } catch (e) {
-      window.open(url, '_blank');
+    const filename = tag ? `instagram_${tag}.jpg` : `instagram_${getPostId()}.jpg`;
+    const fallback = () => {
+      try {
+        chrome.runtime.sendMessage({ action: "downloadMedia", url, filename });
+        incrementDownloadCount();
+      } catch (e) {
+        window.open(url, '_blank');
+      }
+    };
+    // Re-encode through a canvas so the file is a REAL JPEG — Instagram's
+    // CDN often serves WebP/HEIC bytes, which a forced .jpg filename would
+    // just disguise. Falls back to the raw download if fetch/encode fails.
+    fetch(url)
+      .then(r => { if (!r.ok) throw new Error('http ' + r.status); return r.blob(); })
+      .then(blob => createImageBitmap(blob))
+      .then(bitmap => {
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        canvas.getContext('2d').drawImage(bitmap, 0, 0);
+        canvas.toBlob(jpeg => {
+          if (jpeg) {
+            downloadBlob(jpeg, filename);
+            incrementDownloadCount();
+          } else {
+            fallback();
+          }
+        }, 'image/jpeg', 0.95);
+      })
+      .catch(fallback);
+  }
+
+  // Carousel batch download: collect every slide image of the current post
+  // (Instagram slides them via a translated track) and download each one.
+  function getCarouselImages(mediaEl) {
+    let node = mediaEl;
+    while (node && node !== document.body) {
+      const style = node.getAttribute && node.getAttribute('style');
+      if (style && /translateX/.test(style)) {
+        const track = node.parentElement;
+        if (!track) return null;
+        const imgs = [...track.querySelectorAll('img')].filter(i =>
+          i.getBoundingClientRect().width >= 100 && !isSuggestedMedia(i));
+        return imgs.length > 1 ? imgs : null;
+      }
+      node = node.parentElement;
     }
+    return null;
+  }
+
+  function downloadCarousel(mediaEl) {
+    const imgs = getCarouselImages(mediaEl);
+    if (!imgs) { downloadImage(mediaEl); return; }
+    const seen = new Set();
+    let n = 0;
+    imgs.forEach((img) => {
+      const url = getBestImageUrl(img);
+      if (!url || seen.has(url)) return;
+      seen.add(url);
+      n++;
+      // Stagger requests so the browser doesn't choke on a download burst.
+      const index = n;
+      setTimeout(() => downloadImage(img, `${getPostId()}_${index}`), (index - 1) * 400);
+    });
+  }
+
+  // Profile picture download: on profile pages, double-clicking the avatar
+  // downloads the best available resolution as a real JPG.
+  function setupProfilePicDownload() {
+    if (!enabled || !downloadBtnEnabled || !isProfilePage()) return;
+    const avatar = document.querySelector('header img');
+    if (!avatar || avatar.dataset.antiIgPfp) return;
+    avatar.dataset.antiIgPfp = '1';
+    avatar.style.cursor = 'zoom-in';
+    avatar.title = 'Double-click to download profile picture';
+    avatar.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const user = window.location.pathname.split('/').filter(Boolean)[0];
+      downloadImage(avatar, user);
+    });
+  }
+
+  function pickRecordingFormat() {
+    const candidates = [
+      { mime: 'video/mp4;codecs="avc1.42E01E,mp4a.40.2"', ext: 'mp4', blob: 'video/mp4' },
+      { mime: 'video/mp4', ext: 'mp4', blob: 'video/mp4' },
+      { mime: 'video/webm;codecs=vp9,opus', ext: 'webm', blob: 'video/webm' },
+      { mime: 'video/webm;codecs=vp8,opus', ext: 'webm', blob: 'video/webm' },
+      { mime: 'video/webm', ext: 'webm', blob: 'video/webm' }
+    ];
+    for (const c of candidates) {
+      try {
+        if (MediaRecorder.isTypeSupported(c.mime)) return c;
+      } catch (e) { /* keep looking */ }
+    }
+    return null;
   }
 
   function downloadVideo(video) {
@@ -629,19 +736,23 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     dlBusy = true;
     updateDlBtnState();
     try {
+      const format = pickRecordingFormat();
+      if (!format) {
+        console.warn('Anti-IG: no supported recording format');
+        dlBusy = false;
+        updateDlBtnState();
+        return;
+      }
       const stream = video.captureStream ? video.captureStream()
         : video.mozCaptureStream ? video.mozCaptureStream() : null;
       if (!stream) throw new Error('captureStream not supported');
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-        ? 'video/webm;codecs=vp9,opus'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-          ? 'video/webm;codecs=vp8,opus' : 'video/webm';
-      const recorder = new MediaRecorder(stream, { mimeType });
+      const recorder = new MediaRecorder(stream, { mimeType: format.mime });
       const chunks = [];
       recorder.ondataavailable = e => { if (e.data && e.data.size > 0) chunks.push(e.data); };
       recorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'video/webm' });
-        downloadBlob(blob, `instagram_${getPostId()}.webm`);
+        const blob = new Blob(chunks, { type: format.blob });
+        downloadBlob(blob, `instagram_${getPostId()}.${format.ext}`);
+        incrementDownloadCount();
         dlBusy = false;
         updateDlBtnState();
       };
@@ -651,15 +762,19 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
       video.muted = true;
       video.volume = 0;
       video.currentTime = 0;
+      const finish = () => {
+        video.removeEventListener('ended', finish);
+        activeRecording = null;
+        if (recorder.state !== 'inactive') recorder.stop();
+        video.muted = prevMuted;
+        video.volume = prevVolume;
+      };
       video.play().then(() => {
         recorder.start();
-        const onEnded = () => {
-          if (recorder.state !== 'inactive') recorder.stop();
-          video.muted = prevMuted;
-          video.volume = prevVolume;
-          video.removeEventListener('ended', onEnded);
-        };
-        video.addEventListener('ended', onEnded);
+        video.addEventListener('ended', finish);
+        // A second click on the button stops the recording early and saves
+        // whatever has been captured so far (handled in the click handler).
+        activeRecording = { stop: finish };
       }).catch(() => { dlBusy = false; updateDlBtnState(); });
     } catch (e) { dlBusy = false; updateDlBtnState(); }
   }
@@ -667,15 +782,18 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
   function updateDlBtnState() {
     if (!dlBtn) return;
     if (dlBusy) {
-      dlBtn.style.opacity = '0.6';
-      dlBtn.style.pointerEvents = 'none';
+      // Keep pointer events ON — clicking again stops the recording early.
+      dlBtn.style.opacity = '0.85';
+      dlBtn.style.pointerEvents = 'auto';
       dlBtn.querySelector('.dl-icon').style.display = 'none';
       dlBtn.querySelector('.dl-spinner').style.display = 'inline-block';
+      dlBtn.title = 'Recording — click to stop and save';
     } else {
       dlBtn.style.opacity = '1';
       dlBtn.style.pointerEvents = 'auto';
       dlBtn.querySelector('.dl-icon').style.display = 'inline-block';
       dlBtn.querySelector('.dl-spinner').style.display = 'none';
+      dlBtn.title = 'Download media (Alt+click: all carousel images · D: shortcut)';
     }
   }
 
@@ -731,13 +849,17 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
         <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
       </svg>
     `;
-    dlBtn.title = 'Download media';
+    dlBtn.title = 'Download media (Alt+click: all carousel images · D: shortcut)';
     dlBtn.addEventListener('click', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      // Click during a recording: stop early and save what's captured.
+      if (activeRecording) { activeRecording.stop(); return; }
       if (dlBusy) return;
       const { image, video } = findMainMedia();
-      if (video && video.readyState >= 2) {
+      if (e.altKey && image) {
+        downloadCarousel(image);
+      } else if (video && video.readyState >= 2) {
         downloadVideo(video);
       } else if (image) {
         downloadImage(image);
@@ -842,6 +964,19 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
     updateDlBtn();
     enhanceTimestamps();
   }, 300);
+
+  // Keyboard shortcut: press D on a post page to trigger the download
+  // button (ignored while typing in an input/textarea/contenteditable).
+  document.addEventListener('keydown', (e) => {
+    if (!enabled || !downloadBtnEnabled || !isPostPage()) return;
+    if (e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
+    if (e.key.toLowerCase() !== 'd') return;
+    const t = e.target;
+    if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+    if (!dlBtn || dlBtn.style.display === 'none') return;
+    e.preventDefault();
+    dlBtn.click();
+  });
 
   // Also catch carousel nav button clicks for immediate update
   document.addEventListener('click', (e) => {

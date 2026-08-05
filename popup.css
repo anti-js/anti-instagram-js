@@ -214,12 +214,13 @@ input:checked + .slider:before {
 .stats {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  gap: 12px;
 }
 
 .stat {
   display: flex;
   flex-direction: column;
+  flex: 1;
 }
 
 .stat-value {

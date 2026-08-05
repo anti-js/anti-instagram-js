@@ -5,10 +5,11 @@ if (typeof chrome === "undefined" && typeof browser !== "undefined") {
 
 // Background script — manages extension state and blocked counter
 chrome.runtime.onInstalled.addListener(() => {
-  chrome.storage.local.get(["enabled", "blockedCount"], (data) => {
+  chrome.storage.local.get(["enabled", "blockedCount", "downloadCount"], (data) => {
     chrome.storage.local.set({
       enabled: data.enabled !== false,
       blockedCount: data.blockedCount || 0,
+      downloadCount: data.downloadCount || 0,
     });
   });
 });
