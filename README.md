@@ -36,6 +36,8 @@ A browser extension that removes Instagram's login wall so you can browse profil
 
 ## How to install (Firefox / LibreWolf)
 
+https://addons.mozilla.org/en-US/firefox/addon/anti-instagram-js/
+
 Firefox doesn't support MV3 background service workers, so it needs its own manifest — the build script handles that for you:
 
 1. Download or clone this repo
